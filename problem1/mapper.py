@@ -23,7 +23,7 @@ def main():
         
         # Emit each unique word with the document ID
         for word in unique_words:
-            print(f"{word}\t{doc_id}")
+            print(f"{word}\t1")
         count+=1
     print(f"{key_word}\t{count}")
 
