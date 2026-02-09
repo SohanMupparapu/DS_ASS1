@@ -14,7 +14,7 @@ def main():
         if len(parts) != 2:
             continue
         
-        doc_id = parts[0]
+        doc_id = parts[0][-1]
         document_text = parts[1]
         
         words = re.findall(r'\b[a-z]+\b', document_text.lower())
