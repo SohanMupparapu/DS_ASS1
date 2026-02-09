@@ -12,4 +12,4 @@ module load python || true
 INPUT_FILE=$1
 OUTPUT_DIR=$2
 
-srun bash run_mapreduce.sh "$INPUT_FILE" "$OUTPUT_DIR"
+bash run_mapreduce.sh "$INPUT_FILE" "$OUTPUT_DIR"

@@ -15,7 +15,7 @@ class Reducer:
 
             try:
                 key, value = line.split('\t')
-                value = int(value)
+                value = list(value)
             except ValueError:
                 continue  # skip malformed lines
 

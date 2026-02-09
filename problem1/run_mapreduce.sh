@@ -1,83 +1,138 @@
 #!/bin/bash
 
+############################################
+# Arguments
+############################################
 INPUT_FILE=$1
 OUTPUT_DIR=$2
 
-# Parallelism parameters
+############################################
+# Configuration
+############################################
 NUM_MAPPERS=4
 NUM_REDUCERS=4
 
-# Directories
 MAP_DIR=map_parts
 MAP_OUT_DIR=map_out
-REDUCE_DIR=reduce_parts
-
-mkdir -p "$MAP_DIR" "$MAP_OUT_DIR" "$REDUCE_DIR" "$OUTPUT_DIR"
+SHUFFLE_DIR=shuffle
+GROUP_DIR=grouped
 
 ############################################
-# NODE 0 : MAP PHASE
+# Setup
+############################################
+mkdir -p "$MAP_DIR" "$MAP_OUT_DIR" "$SHUFFLE_DIR" "$GROUP_DIR" "$OUTPUT_DIR"
+
+############################################
+# NODE 0 : MAP + COMBINE + SHUFFLE
 ############################################
 if [ "$SLURM_NODEID" -eq 0 ]; then
-    echo "[Node 0] Starting map phase"
+    echo "[Node 0] MAP phase starting"
 
-    rm -f "$MAP_DIR"/* "$MAP_OUT_DIR"/*
+    rm -f "$MAP_DIR"/* "$MAP_OUT_DIR"/* "$SHUFFLE_DIR"/* "$GROUP_DIR"/* map_done.flag
 
-    # 1. Shuffle documents to mappers (hash on document id)
-    awk -v M=$NUM_MAPPERS '
+    ########################################
+    # Split input
+    ########################################
+    TOTAL_LINES=$(wc -l < "$INPUT_FILE")
+    LINES_PER_MAPPER=$(( (TOTAL_LINES + NUM_MAPPERS - 1) / NUM_MAPPERS ))
+
+    split -l "$LINES_PER_MAPPER" \
+          --numeric-suffixes=0 \
+          --suffix-length=1 \
+          "$INPUT_FILE" \
+          "$MAP_DIR/map_part_"
+
+    ########################################
+    # Run mappers + combiners
+    ########################################
+    for part in "$MAP_DIR"/map_part_*; do
+        i=$(basename "$part" | sed "s/map_part_//")
+
+        srun --exclusive -n 1 bash -c "
+            cat '$part' \
+            | python3 mapper.py \
+            | python3 combiner.py \
+            > '$MAP_OUT_DIR/map_out_$i.txt'
+        " &
+    done
+    wait
+
+    echo "[Node 0] MAP phase complete"
+
+    ########################################
+    # SHUFFLE = MERGE + SORT + GROUP
+    ########################################
+    echo "[Node 0] SHUFFLE (sort + group) starting"
+
+    # Merge all mapper outputs
+    cat "$MAP_OUT_DIR"/map_out_*.txt > "$SHUFFLE_DIR/merged.txt"
+
+    # Sort by key
+    sort "$SHUFFLE_DIR/merged.txt" > "$SHUFFLE_DIR/sorted.txt"
+
+    # Group values per key
+    awk '
     {
-        h = 0
-        for (i = 1; i <= length($1); i++)
-            h = (h * 31 + substr($1, i, 1)) % M
-        print $0 >> "'"$MAP_DIR"'/map_part_" h ".txt"
-    }' "$INPUT_FILE"
+        key = $1
+        val = $2
 
-    # 2. Run mappers in parallel (4 CPUs)
-    ls "$MAP_DIR"/map_part_*.txt | \
-    xargs -n 1 -P $NUM_MAPPERS -I {} bash -c '
-        i=$(basename {} | sed "s/map_part_//")
-        cat {} | python3 mapper.py | sort > "'"$MAP_OUT_DIR"'/map_out_$i.txt"
-    '
+        if (NR == 1) {
+            curr = key
+            values = val
+        }
+        else if (key == curr) {
+            values = values "," val
+        }
+        else {
+            print curr "\t" values ""
+            curr = key
+            values = val
+        }
+    }
+    END {
+        if (NR > 0)
+            print curr "\t" values ""
+    }
+    ' "$SHUFFLE_DIR/sorted.txt" > "$GROUP_DIR/grouped.txt"
 
-    echo "[Node 0] Map phase complete"
-fi
+    ########################################
+    # Split grouped keys for reducers
+    ########################################
+    TOTAL_KEYS=$(wc -l < "$GROUP_DIR/grouped.txt")
+    KEYS_PER_REDUCER=$(( (TOTAL_KEYS + NUM_REDUCERS - 1) / NUM_REDUCERS ))
 
-############################################
-# Barrier (filesystem-based)
-############################################
-if [ "$SLURM_NODEID" -eq 0 ]; then
+    split -l "$KEYS_PER_REDUCER" \
+          --numeric-suffixes=0 \
+          --suffix-length=1 \
+          "$GROUP_DIR/grouped.txt" \
+          "$GROUP_DIR/reduce_part_"
+
+    echo "[Node 0] SHUFFLE complete"
+
     touch map_done.flag
 fi
 
+############################################
+# BARRIER
+############################################
 while [ ! -f map_done.flag ]; do
     sleep 1
 done
 
 ############################################
-# NODE 1 : SHUFFLE + REDUCE
+# NODE 1 : REDUCE
 ############################################
 if [ "$SLURM_NODEID" -eq 1 ]; then
-    echo "[Node 1] Starting reduce phase"
+    echo "[Node 1] REDUCE phase starting"
 
-    rm -f "$REDUCE_DIR"/*
+    for f in "$GROUP_DIR"/reduce_part_*; do
+        i=$(basename "$f" | sed "s/reduce_part_//")
 
-    # 3. Shuffle mapper outputs to reducers (hash on key)
-    for f in "$MAP_OUT_DIR"/map_out_*.txt; do
-        awk -v R=$NUM_REDUCERS '
-        {
-            split($0, a, "\t")
-            h = 0
-            for (i = 1; i <= length(a[1]); i++)
-                h = (h * 31 + substr(a[1], i, 1)) % R
-            print $0 >> "'"$REDUCE_DIR"'/reduce_part_" h ".txt"
-        }' "$f"
+        srun --exclusive -n 1 bash -c "
+            cat '$f' | python3 reducer.py > '$OUTPUT_DIR/part-0000$i'
+        " &
     done
+    wait
 
-    # 4. Run reducers in parallel (4 CPUs)
-    ls "$REDUCE_DIR"/reduce_part_*.txt | \
-    xargs -n 1 -P $NUM_REDUCERS -I {} bash -c '
-        i=$(basename {} | sed "s/reduce_part_//")
-        sort {} | python3 reducer.py > "'"$OUTPUT_DIR"'/part-0000$i"
-    '
-
-    echo "[Node 1] Reduce phase complete"
+    echo "[Node 1] REDUCE phase complete"
 fi
