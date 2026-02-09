@@ -37,10 +37,11 @@ if [ "$SLURM_NODEID" -eq 0 ]; then
     LINES_PER_MAPPER=$(( (TOTAL_LINES + NUM_MAPPERS - 1) / NUM_MAPPERS ))
 
     split -l "$LINES_PER_MAPPER" \
-          --numeric-suffixes=0 \
-          --suffix-length=1 \
-          "$INPUT_FILE" \
-          "$MAP_DIR/map_part_"
+      --numeric-suffixes=0 \
+      --suffix-length=1 \
+      --additional-suffix=.txt \
+      "$INPUT_FILE" \
+      "$MAP_DIR/map_part_"
 
     ########################################
     # Run mappers + combiners
@@ -100,12 +101,13 @@ if [ "$SLURM_NODEID" -eq 0 ]; then
     ########################################
     TOTAL_KEYS=$(wc -l < "$GROUP_DIR/grouped.txt")
     KEYS_PER_REDUCER=$(( (TOTAL_KEYS + NUM_REDUCERS - 1) / NUM_REDUCERS ))
-
     split -l "$KEYS_PER_REDUCER" \
-          --numeric-suffixes=0 \
-          --suffix-length=1 \
-          "$GROUP_DIR/grouped.txt" \
-          "$GROUP_DIR/reduce_part_"
+      --numeric-suffixes=0 \
+      --suffix-length=1 \
+      --additional-suffix=.txt \
+      "$GROUP_DIR/grouped.txt" \
+      "$GROUP_DIR/reduce_part_"
+
 
     echo "[Node 0] SHUFFLE complete"
 

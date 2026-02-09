@@ -1,8 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=mapreduce_2node
 #SBATCH --nodes=2
-#SBATCH --ntasks-per-node=1
-#SBATCH --cpus-per-task=4
 #SBATCH --time=00:10:00
 #SBATCH --output=mr_%j.out
 #SBATCH --error=mr_%j.err
