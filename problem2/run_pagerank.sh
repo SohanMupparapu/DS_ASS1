@@ -30,6 +30,8 @@ WORK_DIR=work
 ############################################
 # Setup
 ############################################
+rm -f "$MAP_DIR"/* "$MAP_OUT_DIR"/* \
+              "$SHUFFLE_DIR"/* "$GROUP_DIR"/*
 mkdir -p "$MAP_DIR" "$MAP_OUT_DIR" "$SHUFFLE_DIR" \
          "$GROUP_DIR" "$OUTPUT_DIR" "$LOG_DIR" "$WORK_DIR"
 
@@ -41,6 +43,7 @@ echo "[Node $SLURM_NODEID] Started on $(hostname)"
 ############################################
 CURRENT_INPUT="$INPUT_FILE"
 TOTAL_NODES=$(wc -l < "$INPUT_FILE")
+echo "Total nodes: $TOTAL_NODES"
 export TOTAL_NODES
 export DAMPING
 
@@ -54,9 +57,6 @@ for ((iter=1; iter<=ITERATIONS; iter++)); do
     # MAP + COMBINE + SHUFFLE (NODE 0)
     ########################################
         echo "[Node 0] Iteration $iter: MAP phase"
-
-        rm -f "$MAP_DIR"/* "$MAP_OUT_DIR"/* \
-              "$SHUFFLE_DIR"/* "$GROUP_DIR"/*
 
         ####################################
         # Split input among mappers
@@ -77,7 +77,6 @@ for ((iter=1; iter<=ITERATIONS; iter++)); do
             OUT="'"$MAP_OUT_DIR"'/map_out_${MID}.txt"
 
             python3 mapper.py < "$IN" \
-            | python3 combiner.py \
             > "$OUT"
         '
 

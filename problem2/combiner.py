@@ -1,17 +1,14 @@
 import sys
-import os
-
-DAMPING = float(os.environ["DAMPING"])
-N = int(os.environ["TOTAL_NODES"])
 
 current_node = None
 pr_sum = 0.0
-adj_list = None
+adj_list = None   # use None to distinguish empty vs missing
 
 def emit(node, pr_sum, adj_list):
-    new_pr = (1 - DAMPING) / N + DAMPING * pr_sum
-    print(f"{node}\tPR\t{new_pr:.6f}")
-    print(f"{node}\tADJ\t{adj_list if adj_list else ''}")
+    if pr_sum > 0.0:
+        print(f"{node}\tPR\t{pr_sum}")
+    if adj_list is not None:
+        print(f"{node}\tADJ\t{adj_list}")
 
 for line in sys.stdin:
     line = line.strip()
@@ -20,7 +17,7 @@ for line in sys.stdin:
 
     parts = line.split("\t")
     if len(parts) < 3:
-        continue
+        continue   # defensive: skip malformed lines
 
     node, tag, value = parts[0], parts[1], parts[2]
 
@@ -38,6 +35,6 @@ for line in sys.stdin:
     elif tag == "ADJ":
         adj_list = value
 
-# flush last node
+# flush last key
 if current_node is not None:
     emit(current_node, pr_sum, adj_list)
