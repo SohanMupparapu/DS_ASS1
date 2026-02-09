@@ -1,9 +1,11 @@
 import sys
 import math
+import os
 from collections import defaultdict
 
 word_df = defaultdict(int)
-total_docs = 0
+TOTAL_DOCS = int(os.environ["TOTAL_DOCS"])
+
 
 def process_input():
     global total_docs
@@ -19,18 +21,15 @@ def process_input():
             values = list(map(int, value.split(',')))
         except ValueError:
             continue
-
-        if key == "__DOC_COUNT__":
-            total_docs += sum(values)
         else:
             word_df[key] += sum(values)
 
 def emit_output():
-    if total_docs == 0:
+    if TOTAL_DOCS == 0:
         return
 
     for word, df in word_df.items():
-        idf = math.log(total_docs / df)
+        idf = math.log(TOTAL_DOCS / df)
         print(f"{word}\t{idf:.4f}")
 
 def run():

@@ -3,7 +3,6 @@ import re
 
 def main():
     count=0
-    key_word="__DOC_COUNT__"
     for line in sys.stdin:
         line = line.strip()
         if not line:
@@ -25,7 +24,6 @@ def main():
         for word in unique_words:
             print(f"{word}\t1")
         count+=1
-    print(f"{key_word}\t{count}")
 
 if __name__ == "__main__":
     main()
