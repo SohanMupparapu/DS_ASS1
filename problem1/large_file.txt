@@ -1,0 +1,3 @@
+doc1	the cat sat on the mat
+doc2	the dog sat on the log
+doc3	the cats and dogs are pets
