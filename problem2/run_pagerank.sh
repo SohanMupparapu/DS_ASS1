@@ -30,8 +30,6 @@ WORK_DIR=work
 ############################################
 # Setup
 ############################################
-rm -f "$MAP_DIR"/* "$MAP_OUT_DIR"/* \
-              "$SHUFFLE_DIR"/* "$GROUP_DIR"/*
 mkdir -p "$MAP_DIR" "$MAP_OUT_DIR" "$SHUFFLE_DIR" \
          "$GROUP_DIR" "$OUTPUT_DIR" "$LOG_DIR" "$WORK_DIR"
 
@@ -54,9 +52,12 @@ for ((iter=1; iter<=ITERATIONS; iter++)); do
     echo "========== ITERATION $iter =========="
 
     ########################################
-    # MAP + COMBINE + SHUFFLE (NODE 0)
+    # MAP + COMBINE + SHUFFLE (NODE 0 ONLY)
     ########################################
-        echo "[Node 0] Iteration $iter: MAP phase"
+        echo "Iteration $iter: MAP phase"
+
+        # Clean previous iteration data
+        rm -f "$MAP_DIR"/* "$MAP_OUT_DIR"/* "$SHUFFLE_DIR"/* "$GROUP_DIR"/*
 
         ####################################
         # Split input among mappers
@@ -76,40 +77,56 @@ for ((iter=1; iter<=ITERATIONS; iter++)); do
             IN="'"$MAP_DIR"'/map_part_${MID}.txt"
             OUT="'"$MAP_OUT_DIR"'/map_out_${MID}.txt"
 
-            python3 mapper.py < "$IN" \
-            > "$OUT"
+            # Mapper -> Combiner
+            python3 mapper.py < "$IN" | python3 combiner.py > "$OUT"
         '
 
         ####################################
-        # SHUFFLE = MERGE + SORT + GROUP
+        # SHUFFLE = MERGE + SORT
         ####################################
         cat "$MAP_OUT_DIR"/map_out_*.txt > "$SHUFFLE_DIR/merged.txt"
         sort "$SHUFFLE_DIR/merged.txt" > "$SHUFFLE_DIR/sorted.txt"
 
+        ####################################
+        # GROUP: Combine PR and ADJ into single line per node
+        ####################################
         awk '
+        BEGIN { curr = ""; pr_list = ""; adj = "" }
         {
-            key=$1; tag=$2; val=$3
-            if (NR==1) {
-                curr=key; adj=""; sum=""
+            key = $1
+            tag = $2
+            val = $3
+            
+            # New key encountered
+            if (key != curr && curr != "") {
+                # Emit previous key with all info in ONE line
+                print curr "\t" adj "\t" pr_list
+                pr_list = ""
+                adj = ""
             }
-            if (key!=curr) {
-                print curr "\t" sum "\t" adj
-                curr=key; adj=""; sum=""
-            }
-            if (tag=="PR") {
-                sum = (sum=="" ? val : sum "," val)
-            }
-            else if (tag=="ADJ") {
+            
+            curr = key
+            
+            if (tag == "PR") {
+                # Accumulate PR values as comma-separated list
+                if (pr_list == "") {
+                    pr_list = val
+                } else {
+                    pr_list = pr_list "," val
+                }
+            } else if (tag == "ADJ") {
                 adj = val
             }
         }
         END {
-            if (NR>0)
-                print curr "\t" sum "\t" adj
+            # Emit last key
+            if (curr != "") {
+                print curr "\t" adj "\t" pr_list
+            }
         }' "$SHUFFLE_DIR/sorted.txt" > "$GROUP_DIR/grouped.txt"
 
         ####################################
-        # Split grouped keys for reducers
+        # Split grouped data for reducers
         ####################################
         split -n l/$NUM_REDUCERS \
             --numeric-suffixes=0 \
@@ -118,21 +135,19 @@ for ((iter=1; iter<=ITERATIONS; iter++)); do
             "$GROUP_DIR/grouped.txt" \
             "$GROUP_DIR/reduce_part_"
 
-        touch "$WORK_DIR/iter_${iter}_map_done"
-        echo "[Node 0] Iteration $iter: MAP+SHUFFLE complete"
+        echo "Iteration $iter: MAP+SHUFFLE complete"
 
     ########################################
-    # Barrier
+    # Barrier - wait for all nodes
     ########################################
     echo "[Node $SLURM_NODEID] Waiting at barrier (iteration $iter)"
     srun --ntasks=$SLURM_NTASKS --wait=0 true
     echo "[Node $SLURM_NODEID] Passed barrier (iteration $iter)"
 
-
     ########################################
-    # REDUCE (NODE 1)
+    # REDUCE 
     ########################################
-        echo "[Node 1] Iteration $iter: REDUCE phase"
+        echo "Iteration $iter: REDUCE phase"
 
         srun --ntasks=$NUM_REDUCERS --exclusive bash -c '
             RID=$SLURM_PROCID
@@ -142,10 +157,16 @@ for ((iter=1; iter<=ITERATIONS; iter++)); do
             python3 reducer.py < "$IN" > "$OUT"
         '
 
+        # Merge reducer outputs
         cat "$WORK_DIR"/iter_${iter}_out_*.txt \
             > "$WORK_DIR/iter_${iter}_output.txt"
 
-        echo "[Node 1] Iteration $iter: REDUCE complete"
+        echo "Iteration $iter: REDUCE complete"
+
+    ########################################
+    # Barrier - wait before next iteration
+    ########################################
+    srun --ntasks=$SLURM_NTASKS --wait=0 true
 
     ########################################
     # Prepare input for next iteration
@@ -157,7 +178,6 @@ done
 # Final output
 ############################################
     cp "$CURRENT_INPUT" "$OUTPUT_DIR/result.txt"
-    echo "[Node 1] Final output written"
-
+    echo "Final output written"
 
 echo "[Node $SLURM_NODEID] Job finished"

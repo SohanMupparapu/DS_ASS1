@@ -1,14 +1,7 @@
 import sys
 
-current_node = None
-pr_sum = 0.0
-adj_list = None   # use None to distinguish empty vs missing
-
-def emit(node, pr_sum, adj_list):
-    if pr_sum > 0.0:
-        print(f"{node}\tPR\t{pr_sum}")
-    if adj_list is not None:
-        print(f"{node}\tADJ\t{adj_list}")
+# HashMap to accumulate PR values
+pr_map = {}
 
 for line in sys.stdin:
     line = line.strip()
@@ -21,20 +14,14 @@ for line in sys.stdin:
 
     node, tag, value = parts[0], parts[1], parts[2]
 
-    if current_node is None:
-        current_node = node
-
-    if node != current_node:
-        emit(current_node, pr_sum, adj_list)
-        current_node = node
-        pr_sum = 0.0
-        adj_list = None
-
     if tag == "PR":
-        pr_sum += float(value)
+        # Accumulate PR contributions for this node
+        pr_map[node] = pr_map.get(node, 0.0) + float(value)
     elif tag == "ADJ":
-        adj_list = value
+        # ADJ appears only once per node, emit immediately
+        print(f"{node}\tADJ\t{value}")
 
-# flush last key
-if current_node is not None:
-    emit(current_node, pr_sum, adj_list)
+# After processing all lines, emit accumulated PR values
+for node, pr_sum in pr_map.items():
+    if pr_sum > 0.0:  # optional: skip if no PR contributions
+        print(f"{node}\tPR\t{pr_sum}")

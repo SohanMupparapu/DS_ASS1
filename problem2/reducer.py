@@ -4,15 +4,6 @@ import os
 DAMPING = float(os.environ["DAMPING"])
 N = int(os.environ["TOTAL_NODES"])
 
-current_node = None
-pr_sum = 0.0
-adj_list = None
-
-def emit(node, pr_sum, adj_list):
-    new_pr = (1 - DAMPING) / N + DAMPING * pr_sum
-    print(f"{node}\tPR\t{new_pr:.6f}")
-    print(f"{node}\tADJ\t{adj_list if adj_list else ''}")
-
 for line in sys.stdin:
     line = line.strip()
     if not line:
@@ -22,22 +13,20 @@ for line in sys.stdin:
     if len(parts) < 3:
         continue
 
-    node, tag, value = parts[0], parts[1], parts[2]
+    # Format: node \t adj_list \t pr_values_list
+    node = parts[0]
+    adj_list = parts[1]
+    pr_values_str = parts[2]
 
-    if current_node is None:
-        current_node = node
+    # Sum all PR contributions
+    pr_sum = 0.0
+    if pr_values_str:
+        pr_values = pr_values_str.split(",")
+        for pr_val in pr_values:
+            pr_sum += float(pr_val)
 
-    if node != current_node:
-        emit(current_node, pr_sum, adj_list)
-        current_node = node
-        pr_sum = 0.0
-        adj_list = None
+    # Compute new PageRank
+    new_pr = (1 - DAMPING) / N + DAMPING * pr_sum
 
-    if tag == "PR":
-        pr_sum += float(value)
-    elif tag == "ADJ":
-        adj_list = value
-
-# flush last node
-if current_node is not None:
-    emit(current_node, pr_sum, adj_list)
+    # Output for next iteration: node \t pr \t adj_list
+    print(f"{node}\t{new_pr:.6f}\t{adj_list}")
