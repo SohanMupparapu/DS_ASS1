@@ -45,10 +45,15 @@ echo "Total nodes: $TOTAL_NODES"
 export TOTAL_NODES
 export DAMPING
 
+PROFILE_LOG="profile_metrics.csv"
+echo "iteration,total_time,map_time,shuffle_time,reduce_time,io_time" > $PROFILE_LOG
+
 ############################################
 # ITERATIVE MAPREDUCE
 ############################################
 for ((iter=1; iter<=ITERATIONS; iter++)); do
+    ITER_START=$(date +%s.%N)
+
     echo "========== ITERATION $iter =========="
 
     ########################################
@@ -59,15 +64,20 @@ for ((iter=1; iter<=ITERATIONS; iter++)); do
         # Clean previous iteration data
         rm -f "$MAP_DIR"/* "$MAP_OUT_DIR"/* "$SHUFFLE_DIR"/* "$GROUP_DIR"/*
 
+        MAP_START=$(date +%s.%N)
         ####################################
         # Split input among mappers
         ####################################
+        SPLIT_START=$(date +%s.%N)
         split -n l/$NUM_MAPPERS \
             --numeric-suffixes=0 \
             --suffix-length=1 \
             --additional-suffix=.txt \
             "$CURRENT_INPUT" \
             "$MAP_DIR/map_part_"
+        SPLIT_END=$(date +%s.%N)
+        SPLIT_TIME=$(echo "$SPLIT_END - $SPLIT_START" | bc)
+
 
         ####################################
         # Run mappers + combiners
@@ -80,16 +90,22 @@ for ((iter=1; iter<=ITERATIONS; iter++)); do
             # Mapper -> Combiner
             python3 mapper.py < "$IN" | python3 combiner.py > "$OUT"
         '
+        echo "Iteration $iter: MAP+SHUFFLE complete"
+        MAP_END=$(date +%s.%N)
+        MAP_TIME=$(echo "$MAP_END - $MAP_START" | bc)
 
         ####################################
         # SHUFFLE = MERGE + SORT
         ####################################
+        SHUFFLE_START=$(date +%s.%N)
         cat "$MAP_OUT_DIR"/map_out_*.txt > "$SHUFFLE_DIR/merged.txt"
         sort "$SHUFFLE_DIR/merged.txt" > "$SHUFFLE_DIR/sorted.txt"
-
+        SHUFFLE_END=$(date +%s.%N)
+        SHUFFLE_TIME=$(echo "$SHUFFLE_END - $SHUFFLE_START" | bc)
         ####################################
         # GROUP: Combine PR and ADJ into single line per node
         ####################################
+        GROUP_START=$(date +%s.%N)
         awk '
         BEGIN { curr = ""; pr_list = ""; adj = "" }
         {
@@ -124,7 +140,8 @@ for ((iter=1; iter<=ITERATIONS; iter++)); do
                 print curr "\t" adj "\t" pr_list
             }
         }' "$SHUFFLE_DIR/sorted.txt" > "$GROUP_DIR/grouped.txt"
-
+        GROUP_END=$(date +%s.%N)
+        GROUP_TIME=$(echo "$GROUP_END - $GROUP_START" | bc)
         ####################################
         # Split grouped data for reducers
         ####################################
@@ -137,6 +154,7 @@ for ((iter=1; iter<=ITERATIONS; iter++)); do
 
         echo "Iteration $iter: MAP+SHUFFLE complete"
 
+        SHUFFLE_TIME=$(echo "$SHUFFLE_END - $SHUFFLE_START" | bc)
     ########################################
     # Barrier - wait for all nodes
     ########################################
@@ -148,6 +166,7 @@ for ((iter=1; iter<=ITERATIONS; iter++)); do
     # REDUCE 
     ########################################
         echo "Iteration $iter: REDUCE phase"
+        REDUCE_START=$(date +%s.%N)
 
         srun --ntasks=$NUM_REDUCERS --exclusive bash -c '
             RID=$SLURM_PROCID
@@ -158,8 +177,14 @@ for ((iter=1; iter<=ITERATIONS; iter++)); do
         '
 
         # Merge reducer outputs
+        MERGE_START=$(date +%s.%N)
         cat "$WORK_DIR"/iter_${iter}_out_*.txt \
             > "$WORK_DIR/iter_${iter}_output.txt"
+        MERGE_END=$(date +%s.%N)
+        MERGE_TIME=$(echo "$MERGE_END - $MERGE_START" | bc)
+
+        REDUCE_END=$(date +%s.%N)
+        REDUCE_TIME=$(echo "$REDUCE_END - $REDUCE_START" | bc)
 
         echo "Iteration $iter: REDUCE complete"
 
@@ -172,6 +197,10 @@ for ((iter=1; iter<=ITERATIONS; iter++)); do
     # Prepare input for next iteration
     ########################################
     CURRENT_INPUT="$WORK_DIR/iter_${iter}_output.txt"
+    ITER_END=$(date +%s.%N)
+    TOTAL_TIME=$(echo "$ITER_END - $ITER_START" | bc)
+    IO_TIME=$(echo "$SPLIT_TIME + $MERGE_TIME + $GROUP_TIME + $SHUFFLE_TIME" | bc)
+    echo "$iter,$TOTAL_TIME,$MAP_TIME,$SHUFFLE_TIME,$REDUCE_TIME,$IO_TIME" >> $PROFILE_LOG
 done
 
 ############################################

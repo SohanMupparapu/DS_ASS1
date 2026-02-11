@@ -54,7 +54,11 @@ int main(int argc, char** argv){
     }
 
     bool changed = true;
+    double start_time, end_time;
 
+    MPI_Barrier(MPI_COMM_WORLD);
+    start_time = MPI_Wtime();
+    
     while(changed){
         changed = false;
         vector<int> new_comp = comp;
@@ -89,6 +93,14 @@ int main(int argc, char** argv){
         
         // Check globally if any process had changes
         MPI_Allreduce(&local_changed, &changed, 1, MPI_CXX_BOOL, MPI_LOR, MPI_COMM_WORLD);
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    end_time = MPI_Wtime();
+
+    if (rank == 0) {
+        cout << "Total Execution Time: "
+             << (end_time - start_time) << " seconds" << endl;
     }
 
     if(rank == 0){
