@@ -59,9 +59,13 @@ int main(int argc, char** argv){
     MPI_Barrier(MPI_COMM_WORLD);
     start_time = MPI_Wtime();
     
+    double comm_time = 0.0;
+    double comp_time = 0.0;
+
     while(changed){
         changed = false;
         vector<int> new_comp = comp;
+        double comp_start = MPI_Wtime();
 
         for (auto &e : edges){
             int u = e.first, v = e.second;
@@ -75,7 +79,11 @@ int main(int argc, char** argv){
                 changed = true;
             }
         }
+        double comp_end = MPI_Wtime();
+        comp_time += (comp_end - comp_start);
 
+        // Communication timing
+        double comm_start = MPI_Wtime();
         // Reduce to get minimum component ID for each vertex across all processes
         MPI_Allreduce(MPI_IN_PLACE, new_comp.data(), n, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
         
@@ -93,10 +101,20 @@ int main(int argc, char** argv){
         
         // Check globally if any process had changes
         MPI_Allreduce(&local_changed, &changed, 1, MPI_CXX_BOOL, MPI_LOR, MPI_COMM_WORLD);
+        double comm_end = MPI_Wtime();
+        comm_time += (comm_end - comm_start);
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
     end_time = MPI_Wtime();
+
+    double total_comm, total_comp;
+
+    MPI_Reduce(&comm_time, &total_comm, 1,
+               MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
+    
+    MPI_Reduce(&comp_time, &total_comp, 1,
+           MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
 
     if (rank == 0) {
         cout << "Total Execution Time: "
@@ -104,10 +122,22 @@ int main(int argc, char** argv){
     }
 
     if(rank == 0){
+        cout << "Computation time: " << total_comp << endl;
+        cout << "Communication time: " << total_comm << endl;
+    }
+
+    if(rank == 0){
         for(int i = 0; i < n; i++){
             cout << i << " " << comp[i] << endl;
         }
     }
+
+    if(rank == 0){
+        cout << "Message size per Allreduce: "
+             << n * sizeof(int) / (1024.0*1024.0)
+             << " MB" << endl;
+    }
+
 
     MPI_Finalize();
     return 0;
